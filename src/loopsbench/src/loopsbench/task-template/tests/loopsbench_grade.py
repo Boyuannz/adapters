@@ -251,6 +251,15 @@ def is_resolved(results: Dict[str, str]) -> bool:
     return all(s in (PASSED, SKIPPED) for s in statuses)
 
 
+def merge_results(parsed: Dict[str, str], summary_only: bool) -> Dict[str, str]:
+    results: Dict[str, str] = {}
+    for case, status in parsed.items():
+        case_id = normalize_test_case_id(case)
+        if case_id != "__summary__" or summary_only:
+            results.setdefault(case_id, status)
+    return results
+
+
 def main() -> int:
     log_path, exit_code, out_dir = Path(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
     raw = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
@@ -264,8 +273,8 @@ def main() -> int:
         # Upstream records FailureMode.TEST_TIMEOUT before parsing: unresolved.
         results, resolved = {}, False
     else:
-        parsed, _ = parse(out)
-        results = {normalize_test_case_id(k): v for k, v in parsed.items()}
+        parsed, summary_only = parse(out)
+        results = merge_results(parsed, summary_only)
         resolved = is_resolved(results)
     counts: Dict[str, int] = {}
     for status in results.values():

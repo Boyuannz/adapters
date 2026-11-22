@@ -61,7 +61,7 @@ test -d "$REVIEWED_TASKS_DIR" &&
     --output-dir ../../datasets/loopsbench-reviewed
 ```
 
-`--tasks-dir` is required. `--task-ids` narrows selection within the reviewed input and accepts upstream or Harbor IDs. `--limit` caps the number of generated tasks, and `--overwrite` replaces existing outputs. `--bundle` records the source bundle revision. `--cpus`, `--memory-mb`, and `--storage-mb` override the generated resource settings.
+`--tasks-dir` is required. `--task-ids` narrows selection within the reviewed input and accepts upstream or Harbor IDs. `--limit` caps the number of generated tasks, and `--overwrite` replaces existing selected tasks. A directory containing an excluded task is rejected. Use a new output directory when migrating an older dataset. `--bundle` records the source bundle revision. `--cpus`, `--memory-mb`, and `--storage-mb` override the generated resource settings.
 
 ## Comparison with Original Benchmark (Parity)
 
@@ -86,7 +86,7 @@ Before agent parity, compare the oracle outcomes on the reviewed tasks. Run the 
 - `django-seg11`, `llvm-alive-verification`, and `typescript-seg01` are excluded because the reference solution fails the same tests in Harbor and the upstream harness.
 - `framework-seg04` is excluded after Composer blocked its Laravel requirement on security advisories. `jenkins-seg02` and `jenkins-seg05` are excluded after their Harbor builds failed during Maven archive extraction. All three upstream comparisons ended at the Docker build time bound.
 - The adapter removes Dockerfile instructions that copy reference patches into the agent image for upstream tasks `mlir_circuit_ir` and `mlsys_autodiff_pa1`. The reference patches remain in the oracle solution assets. A parity comparison needs the same correction on both sides.
-- Harbor runs verification in the agent container so the workspace, ignored build outputs, and file timestamps remain available. The upstream harness copies the workspace to a separate tester container. The generated verifier uses public networking because some upstream test scripts install dependencies at verification time.
+- Harbor snapshots `/workspace` after the agent phase, then restores it in a fresh verifier container from the same image. The archive preserves ignored build outputs, file timestamps, and workspace links. Verifier assets and reward files are created outside the restored workspace. The generated verifier uses public networking because some upstream test scripts install dependencies at verification time.
 - The adapter carries over Compose capabilities where needed. Upstream host networking and custom bridge networks are omitted.
 - The Dockerfiles for `navidrome-seg02` and `node-seg03` restore the original cyclic symlinks inside the image. This lets Harbor fingerprint each task directory while preserving its in-container layout.
 - The `node-seg03` Dockerfile uses the official Debian security archive for its Bullseye security packages after the original mirror began returning HTTP 404. APT signature verification stays enabled.

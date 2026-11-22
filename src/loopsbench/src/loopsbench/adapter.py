@@ -5,9 +5,9 @@ Terminal-Bench-style directory: ``task.yaml``, ``Dockerfile`` plus a ``base/``
 build context, ``solution.sh`` with ``gold_patches/``, and ``tests/`` with
 ``run-tests.sh``. Upstream runs the agent in a ``client`` container, copies its
 ``/workspace`` into a fresh ``tester`` container built from the same image and
-runs ``run-tests.sh`` there. Harbor uses a shared verifier environment to
-preserve ``/workspace``, with ``tests/test.sh`` reproducing the upstream
-TestRunner and result parser.
+runs ``run-tests.sh`` there. Harbor transfers a workspace archive to a separate
+verifier container, with ``tests/test.sh`` reproducing the upstream TestRunner
+and result parser.
 """
 
 from __future__ import annotations
@@ -162,6 +162,15 @@ class LoopsBenchAdapter:
         return dirs
 
     def run(self) -> list[Path]:
+        stale = sorted(
+            name for name in _EXCLUDED_TASK_IDS
+            if (self.output_dir / name).exists() or (self.output_dir / name).is_symlink()
+        )
+        if stale:
+            raise ValueError(
+                f"Output directory {self.output_dir} contains excluded tasks {stale}. "
+                "Use a new output directory."
+            )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         written = []
         for src in self.upstream_task_dirs():
@@ -290,6 +299,7 @@ class LoopsBenchAdapter:
         harness.mkdir()
         shutil.copy2(src / "run-tests.sh", harness / "run-tests.sh")
         shutil.copy2(TEMPLATE_DIR / "tests" / "loopsbench_grade.py", harness / "loopsbench_grade.py")
+        shutil.copy2(TEMPLATE_DIR / "tests" / "workspace_snapshot.py", harness / "workspace_snapshot.py")
         uses_base_assets = any(
             "task-assets" in p.read_text(encoding="utf-8", errors="ignore")
             for p in [src / "run-tests.sh", *(src / "tests").rglob("*")]
