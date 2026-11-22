@@ -14,12 +14,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+from .build_context import isolate_build_context
+from .verifier_network import bake_verifier_dependencies, harbor_network_values
 
 logger = logging.getLogger(__name__)
 
@@ -256,8 +260,10 @@ class LoopsBenchAdapter:
         adapted = self._restore_cyclic_base_link(src.name, env_dir, stripped)
         if step := _DOCKERFILE_STEPS.get(harbor_id(src.name)):
             adapted = _insert_dockerfile_step(src.name, adapted, *step)
+        adapted = bake_verifier_dependencies(src.name, adapted)
         if adapted != text:
             dockerfile.write_text(adapted, encoding="utf-8")
+        isolate_build_context(env_dir)
 
     @staticmethod
     def _restore_cyclic_base_link(task_id: str, env_dir: Path, dockerfile: str) -> str:
@@ -272,7 +278,9 @@ class LoopsBenchAdapter:
             raise ValueError(f"{task_id}: cyclic link {relative_link!r} no longer points to '..'")
         restore = json.dumps(["ln", "-s", "--", target, f"/workspace/{relative_link}"])
         dockerfile = _insert_dockerfile_step(task_id, dockerfile, "COPY base/ /workspace/", f"RUN {restore}")
+        parent = link.parent.stat()
         link.unlink()
+        os.utime(link.parent, ns=(parent.st_atime_ns, parent.st_mtime_ns))
         return dockerfile
 
     def _write_solution(self, src: Path, dst: Path) -> None:
@@ -330,6 +338,7 @@ class LoopsBenchAdapter:
         )
         text = (TEMPLATE_DIR / "task.toml").read_text(encoding="utf-8")
         values = {
+            **harbor_network_values(src.name),
             "harbor_id": task_id,
             "upstream_id": src.name,
             "bundle": self.bundle,

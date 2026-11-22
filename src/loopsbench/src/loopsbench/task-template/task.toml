@@ -1,4 +1,4 @@
-schema_version = "1.3"
+version = "1.0"
 source = "LoopsBench"
 
 artifacts = [
@@ -40,8 +40,7 @@ allowed_hosts = []
 [verifier]
 timeout_sec = {verifier_timeout_sec}
 environment_mode = "separate"
-# Many run-tests.sh scripts install uv and pytest at test time.
-network_mode = "public"
+{verifier_network}
 
 [[verifier.collect]]
 timeout_sec = 600
