@@ -33,7 +33,7 @@
         "parity_matching_agents": [],
         "parity_unmatching_agents": ["None"],
         "parity_costs": null,
-        "notes": "104 tasks have passing Harbor oracle results across the baseline and follow-up runs. Eight source tasks are excluded. Parity settings are pending team coordination."
+        "notes": "Harbor 0.27.0 graded all 104 final task packages with separate verifiers on oahu. The full run scored 97/104. The tasks that scored zero were java-ds-coursework, jpf-symbolic-execution, net-os-labs, os-c-fs-labs, riscv-os-multiproject, spring-course-mgmt-fullstack, x86-os-four-labs. See the README for the independent controls. Eight source tasks are excluded. Parity settings are pending team coordination."
       }
     ]
   }
