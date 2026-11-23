@@ -66,8 +66,6 @@ task_ids = [
     "task_net_os_labs",
     "task_node_seg03",
     "task_os_distributed_practicals",
-    "task_panda3d_collision_hard",
-    "task_panda3d_pgraph_medium",
     "task_perses_program_reduction",
     "task_rails_seg09",
     "task_riscv_cpu_six_labs",
@@ -168,12 +166,15 @@ task_ids = [
     "task_datastructs_java",
 ]
 
-# ClickHouse installs system pytest and the MLP task creates a new venv.
+# ClickHouse and MLP install Python test dependencies. Panda3D makepanda
+# installs the pinned panda3d-interrogate wheel during verification.
 [profiles.pypi]
 host_sets = ["pypi"]
 task_ids = [
     "task_ClickHouse_seg07",
     "task_mlp_numpy_coursework",
+    "task_panda3d_collision_hard",
+    "task_panda3d_pgraph_medium",
 ]
 
 # The script creates a fresh Python venv; Go builds against the snapshot.

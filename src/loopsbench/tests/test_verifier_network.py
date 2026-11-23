@@ -74,11 +74,18 @@ class VerifierNetworkTests(unittest.TestCase):
                 self.assertEqual(task["agent"]["network_mode"], "allowlist")
                 self.assertEqual(task["agent"]["allowed_hosts"], [])
                 self.assertEqual(task["environment"]["network_mode"], "public")
-        self.assertEqual(modes, {"allowlist": 67, "no-network": 37})
+        self.assertEqual(modes, {"allowlist": 69, "no-network": 35})
 
     def test_matching_harbor_and_upstream_policies(self):
         cases = {
             "task_net_os_labs": {"network_mode": "no-network"},
+            **{
+                task: {
+                    "network_mode": "allowlist",
+                    "allowed_hosts": ["files.pythonhosted.org", "pypi.org"],
+                }
+                for task in ("task_panda3d_collision_hard", "task_panda3d_pgraph_medium")
+            },
             "task_db_nanodb": {
                 "network_mode": "allowlist",
                 "allowed_hosts": ["repo.maven.apache.org", "repo1.maven.org"],
