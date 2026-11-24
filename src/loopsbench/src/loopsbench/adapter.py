@@ -12,11 +12,16 @@ and result parser.
 
 from __future__ import annotations
 
+import ctypes
+import errno
+import fcntl
 import json
 import logging
 import os
 import re
 import shutil
+import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -126,6 +131,54 @@ def _insert_dockerfile_step(task_id: str, dockerfile: str, after: str, step: str
     return anchor.sub(lambda match: f"{match.group()}\n{step}", dockerfile, count=1)
 
 
+def _complete_task(path: Path) -> bool:
+    required = (
+        "task.toml",
+        "instruction.md",
+        "environment/Dockerfile",
+        "tests/test.sh",
+        "tests/_loopsbench/run-tests.sh",
+        "tests/_loopsbench/loopsbench_grade.py",
+        "solution/solve.sh",
+        "solution/task_files/solution.sh",
+    )
+    if path.is_symlink() or not all((path / name).is_file() for name in required):
+        return False
+    try:
+        with (path / "task.toml").open("rb") as file:
+            config = tomllib.load(file)
+    except (FileNotFoundError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return False
+    task = config.get("task")
+    verifier = config.get("verifier", {})
+    if not isinstance(task, dict) or task.get("name") != f"loopsbench/{path.name}":
+        return False
+    if not isinstance(verifier, dict):
+        return False
+    # The older shared verifier ran directly in the agent's workspace.
+    return (
+        verifier.get("environment_mode") != "separate"
+        or (path / "tests/_loopsbench/workspace_snapshot.py").is_file()
+    )
+
+
+def _exchange_task_dirs(staged: Path, destination: Path) -> None:
+    """Replace a populated directory without removing it from the output first."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    source, target = os.fsencode(staged), os.fsencode(destination)
+    if hasattr(libc, "renameat2"):
+        at_fdcwd, rename_exchange = -100, 2
+        result = libc.renameat2(at_fdcwd, source, at_fdcwd, target, rename_exchange)
+    elif hasattr(libc, "renamex_np"):
+        rename_swap = 2
+        result = libc.renamex_np(source, target, rename_swap)
+    else:
+        raise OSError(errno.ENOTSUP, "Atomic directory replacement is unavailable", destination)
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), staged, None, destination)
+
+
 class LoopsBenchAdapter:
     def __init__(
         self,
@@ -165,7 +218,18 @@ class LoopsBenchAdapter:
             dirs = dirs[: self.limit]
         return dirs
 
-    def run(self) -> list[Path]:
+    def run(self, *, exact_output: bool = False) -> list[Path]:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Lock the directory inode for the entire run so selection, checks, and
+        # publication share the same lock across processes and path aliases.
+        output_fd = os.open(self.output_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(output_fd, fcntl.LOCK_EX)
+            return self._run_locked(exact_output)
+        finally:
+            os.close(output_fd)
+
+    def _run_locked(self, exact_output: bool) -> list[Path]:
         stale = sorted(
             name for name in _EXCLUDED_TASK_IDS
             if (self.output_dir / name).exists() or (self.output_dir / name).is_symlink()
@@ -175,19 +239,69 @@ class LoopsBenchAdapter:
                 f"Output directory {self.output_dir} contains excluded tasks {stale}. "
                 "Use a new output directory."
             )
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        written = []
+        selected: dict[str, Path] = {}
+        input_root = self.tasks_dir.resolve()
+        output_root = self.output_dir.resolve()
         for src in self.upstream_task_dirs():
-            dst = self.output_dir / harbor_id(src.name)
-            if dst.exists():
-                if not self.overwrite:
-                    logger.info("skip %s (exists; use --overwrite)", dst.name)
+            task_id = harbor_id(src.name)
+            if not task_id:
+                raise ValueError(f"Task directory {src.name!r} has an empty Harbor id")
+            if task_id in selected:
+                raise ValueError(
+                    f"Task directories {selected[task_id].name!r} and {src.name!r} "
+                    f"both map to Harbor id {task_id!r}"
+                )
+            source = src.resolve()
+            destination = output_root / task_id
+            if (
+                output_root.is_relative_to(source) or source.is_relative_to(destination)
+                or input_root.is_relative_to(destination)
+            ):
+                raise ValueError(f"Output for {task_id!r} overlaps its source directory {src}")
+            selected[task_id] = src
+        if exact_output:
+            self._check_output_extras(selected)
+
+        written = []
+        for task_id, src in selected.items():
+            dst = self.output_dir / task_id
+            exists = dst.exists()
+            if dst.is_symlink() or (exists and not dst.is_dir()):
+                raise ValueError(f"Expected a task directory at {dst}")
+            if exists and not self.overwrite:
+                if _complete_task(dst):
+                    logger.info("skip %s (complete; use --overwrite)", dst.name)
                     continue
-                shutil.rmtree(dst)
-            self.generate_task(src, dst)
+                logger.info("regenerating incomplete task %s", dst.name)
+
+            # Keep staging on the destination filesystem and a level below
+            # task discovery. After an exchange, cleanup removes the old task.
+            with tempfile.TemporaryDirectory(prefix=".loopsbench-stage-", dir=self.output_dir) as stage:
+                staged = Path(stage) / task_id
+                self.generate_task(src, staged)
+                if not _complete_task(staged):
+                    raise ValueError(f"Generation produced an incomplete task for {src.name}")
+                if exists:
+                    _exchange_task_dirs(staged, dst)
+                else:
+                    staged.rename(dst)
             written.append(dst)
             logger.info("wrote %s", dst)
+
+        if exact_output:
+            self._check_output_extras(selected)
+            incomplete = sorted(name for name in selected if not _complete_task(self.output_dir / name))
+            if incomplete:
+                raise ValueError(f"Parity output is missing complete tasks: {incomplete}")
         return written
+
+    def _check_output_extras(self, selected: dict[str, Path]) -> None:
+        extras = sorted(
+            path.parent.name for path in self.output_dir.glob("*/task.toml")
+            if path.parent.name not in selected
+        )
+        if extras:
+            raise ValueError(f"Output already contains tasks outside the parity split: {extras}")
 
     # ---------------------------------------------------------------- generate
     def generate_task(self, src: Path, dst: Path) -> None:

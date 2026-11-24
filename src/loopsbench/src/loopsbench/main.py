@@ -35,7 +35,8 @@ def main() -> None:
     p.add_argument("--task-ids", nargs="+", default=None,
                    help="Upstream ids (task_foo) or Harbor ids (foo)")
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Replace complete tasks as well as retrying incomplete tasks")
     p.add_argument("--bundle", default="c47e13a",
                    help="Upstream bundle revision recorded in task metadata")
     p.add_argument("--cpus", type=int,
@@ -47,17 +48,14 @@ def main() -> None:
 
     output_dir = args.output_dir or DEFAULT_OUTPUT_DIR
     task_ids = args.task_ids
-    if args.split == "parity":
+    parity = args.split == "parity"
+    if parity:
         if task_ids is not None or args.limit is not None:
             p.error("--split parity selects a fixed set and cannot be combined with --task-ids or --limit")
         output_dir = args.output_dir or Path("datasets/loopsbench-parity")
-        extras = sorted(path.parent.name for path in output_dir.glob("*/task.toml")
-                        if path.parent.name not in PARITY_TASK_IDS)
-        if extras:
-            p.error(f"Output already contains tasks outside the parity split: {extras}")
         task_ids = list(PARITY_TASK_IDS)
 
-    written = LoopsBenchAdapter(
+    adapter = LoopsBenchAdapter(
         tasks_dir=args.tasks_dir,
         output_dir=output_dir,
         bundle=args.bundle,
@@ -65,8 +63,16 @@ def main() -> None:
         limit=args.limit,
         overwrite=args.overwrite,
         resources=Resources(cpus=args.cpus, memory_mb=args.memory_mb, storage_mb=args.storage_mb),
-    ).run()
-    logging.info("Generated %d task(s) in %s", len(written), output_dir)
+    )
+    try:
+        written = adapter.run(exact_output=parity)
+    except (OSError, ValueError) as exc:
+        p.error(str(exc))
+    if parity:
+        logging.info("Parity output contains %d complete tasks in %s (%d generated)",
+                     len(PARITY_TASK_IDS), output_dir, len(written))
+    else:
+        logging.info("Generated %d task(s) in %s", len(written), output_dir)
 
 
 if __name__ == "__main__":
