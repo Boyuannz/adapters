@@ -68,6 +68,8 @@ Seven tasks scored 0.0 in the full run.
 
 The standalone checks ran sequentially on the physical host after the full suite, using the same final packages and time limits. The full-run score above retains the original rewards. [Standalone results](evidence/standalone-oracle-checks.png)
 
+On November 24, the unchanged `os-c-fs-labs` task passed all 42 pytest cases on both the Harbor oracle and the staged upstream oracle on oahu. The Harbor verifier fetched the Ubuntu indexes in two seconds. Both runs kept the original 300-second test limit and used the same verifier allowlist. Across the full run and the separate checks, 103 distinct final packages have a passing Harbor oracle result. The remaining task is `net-os-labs`. [Paired follow-up](evidence/os-c-fs-labs-control.png)
+
 The earlier Harbor 0.26.0 run scored 103/104.
 
 ## Usage: Create Task Directories
@@ -89,7 +91,27 @@ test -d "$REVIEWED_TASKS_DIR" &&
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity is pending coordination with the Harbor team on the agent, model, reviewed task subset, and run settings. No parity claims are made.
+### Proposed experiment
+
+We propose Codex on both sides with the same pinned CLI release and GPT-5 mini snapshot. The Harbor team still needs to confirm the model, API provisioning, and run count. We propose a five-task smoke test (distributed-fs-chfs, evosuite-test-generation, navidrome-seg02, numpy-dl-aics-style, cocos2dx-physics2d-medium), followed by one paired run on all ten selected tasks and then two additional runs per side. Each run uses one attempt per task. Both sides must use the same prompt, model settings, tools, time limits and model-endpoint access.
+
+Generate the proposed ten-task set from the reviewed inputs in a fresh output directory:
+
+```bash
+uv run --project src/loopsbench loopsbench --split parity \
+  --tasks-dir "$REVIEWED_TASKS_DIR" --output-dir datasets/loopsbench-parity
+```
+
+The sample is fixed for bundle `c47e13a`. We grouped the 104 reviewed tasks by upstream difficulty and whether the Harbor ID ends in `-seg` followed by digits. We allocated ten places proportionally using largest remainders and took the lowest SHA-256 hashes of `c47e13a/<harbor-id>` in each group. Selection uses task metadata only.
+
+| Group | Available | Selected tasks |
+| --- | ---: | --- |
+| Easy | 17 | distributed-fs-chfs, architecture-riscv-labs |
+| Medium | 42 | numpy-dl-aics-style, cocos2dx-physics2d-medium, deep-learning-three-assignments, ligra-graph-evolution |
+| Hard, unsegmented | 21 | evosuite-test-generation, boogie-dafny |
+| Hard, segmented | 24 | navidrome-seg02, echarts-seg05 |
+
+### Results
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 | --- | --- | --- | --- | --- | --- | --- |
