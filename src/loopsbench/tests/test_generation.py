@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from loopsbench.adapter import LoopsBenchAdapter
 from loopsbench.main import PARITY_TASK_IDS
-from loopsbench.parity import prepare, SMOKE_IDS
+from loopsbench.parity import check_version, prepare, SMOKE_IDS
 
 
 class GenerationTests(unittest.TestCase):
@@ -181,7 +181,8 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(concurrent.result(timeout=5), [])
             second_generate.assert_not_called()
 
-    def test_paired_plans_keep_exact_task_sets_and_endpoint_access(self):
+    @patch("loopsbench.parity.native_prompts", side_effect=lambda checkout, dirs: ["final prompt"] * len(dirs))
+    def test_paired_plans_keep_exact_task_sets_and_endpoint_access(self, render):
         for task_id in PARITY_TASK_IDS:
             src = self.make_task(task_id)
             if task_id == "numpy-dl-aics-style":
@@ -193,12 +194,13 @@ class GenerationTests(unittest.TestCase):
             plan = self.root / split
             prepare(self.source, self.output, plan, split=split, model="openai/test",
                     base_url="https://model.example/v1", version="1.2.3",
-                    binary=Path("/opt/test/codex"))
+                    binary=Path("/opt/test/codex"), checkout=self.root)
             job = yaml.safe_load((plan / "harbor.yaml").read_text())
             self.assertEqual([Path(t["path"]).name for t in job["tasks"]], list(expected))
             self.assertEqual(job["agents"][0]["kwargs"]["version"], "1.2.3")
             self.assertEqual(job["agents"][0]["extra_allowed_hosts"], ["model.example"])
             for task_id in expected:
+                self.assertEqual((plan / "harbor-tasks" / task_id / "instruction.md").read_bytes(), b"final prompt")
                 native = yaml.safe_load((plan / task_id / "run.yaml").read_text())
                 self.assertEqual(native["agent"], "codex")
                 self.assertEqual(native["model"], job["agents"][0]["model_name"])
@@ -211,6 +213,22 @@ class GenerationTests(unittest.TestCase):
                 self.assertEqual(native["task_ids"], [source_id])
                 compose = Path(native["dataset_path"]) / source_id / "docker-compose.yaml"
                 self.assertNotIn("network_mode", yaml.safe_load(compose.read_text())["services"]["client"])
+
+    def test_version_check_reads_both_pins_from_plan(self):
+        executable = self.root / "codex"
+        executable.write_bytes(b"\x7fELF")
+        plan = self.root
+        (plan / "one").mkdir()
+        (plan / "one/run.yaml").write_text(yaml.safe_dump({
+            "agent_kwargs": {"codex_binary": str(executable)}}))
+        (plan / "harbor.yaml").write_text(yaml.safe_dump({
+            "tasks": [{"path": "harbor-tasks/one"}], "agents": [{"kwargs": {"version": "1.2.3"}}]}))
+        with patch("loopsbench.parity.subprocess.check_output", return_value="codex-cli 1.2.4") as run:
+            with self.assertRaisesRegex(ValueError, "requires 1.2.3"):
+                check_version(plan)
+            run.assert_called_once_with([executable, "--version"], text=True)
+            run.return_value = "codex-cli 1.2.3"
+            check_version(plan)
 
     def test_parity_cli_checks_all_ten_tasks_including_skips(self):
         for task_id in PARITY_TASK_IDS:

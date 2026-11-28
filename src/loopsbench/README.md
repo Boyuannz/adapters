@@ -119,18 +119,25 @@ From the adapters repository root, use the ten generated Harbor packages above a
 export PLAN="$PWD/parity-smoke"
 uv run --project src/loopsbench python -m loopsbench.parity \
   --source "$REVIEWED_TASKS_DIR" --harbor datasets/loopsbench-parity \
-  --split smoke --output "$PLAN" --model "$PARITY_MODEL" \
+  --checkout "$UPSTREAM_CHECKOUT" --split smoke --output "$PLAN" --model "$PARITY_MODEL" \
   --base-url "$OPENAI_BASE_URL" --version "$CODEX_VERSION" --binary "$CODEX_BIN_HOST"
 ```
 
-For the two source tasks that request host networking, staging removes that setting so the native agent can use the same model-endpoint allowlist as Harbor. The Harbor job lists each task path explicitly. Each upstream job stages one matching task with its own verifier network policy and the generated Harbor build context. Both sides use one attempt, the same model endpoint and disabled web search. Upstream uses one outer-loop round. The original task and native grader are retained. Check the actual prompt, CLI version, time limits and model route in both smoke traces before running the full set.
+For the two source tasks that request host networking, staging removes that setting so the native agent can use the same model-endpoint allowlist as Harbor. The plan copies each Harbor task and renders its first-round instruction with the pinned upstream harness and a fresh trial patch history. The Harbor job uses these plan-local copies. Each upstream job stages one matching task with its own verifier network policy and the generated Harbor build context. Both sides use one attempt, the same model endpoint and disabled web search. Upstream uses one outer-loop round. The original task and native grader are retained. Check the actual prompt, CLI version, time limits and model route in both smoke traces before running the full set.
+
+To compare the exact UTF-8 task argument of both Codex command builders offline, run the following with Harbor 0.27.0's Python. The check intercepts the command before execution, uses a dummy credential and prints the byte length and SHA-256 of each matching pair.
+
+```bash
+env -i PATH=/usr/bin:/bin HOME=/tmp OPENAI_API_KEY=offline-placeholder \
+  "$HARBOR_PYTHON" -I src/loopsbench/tests/offline_prompt_check.py "$PLAN" "$UPSTREAM_CHECKOUT"
+```
 
 After obtaining the parity allocation, export `OPENAI_API_KEY` in the launching shell. Run one paired round as follows. Use the executable from the pinned upstream checkout to avoid confusion with the generator CLI.
 
 ```bash
 (
   set -eu
-  test "$("$CODEX_BIN_HOST" --version)" = "codex-cli $CODEX_VERSION"
+  uv run --project src/loopsbench python -m loopsbench.parity check-version "$PLAN"
   export DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1
   for cfg in "$PLAN"/*/run.yaml; do
     "$UPSTREAM_CHECKOUT/.venv/bin/loopsbench" run -c "$cfg"
