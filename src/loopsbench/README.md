@@ -2,7 +2,7 @@
 
 ## Overview
 
-This adapter converts LoopsBench tasks into Harbor tasks. The upstream manifest for `loopsbench-tasks-c47e13a.tar.zst` lists **112 upstream tasks**. The adapter selects **104 tasks** after eight exclusions. On oahu, the Harbor 0.27.0 oracle ran all 104 final task packages with separate verifiers. **97/104 scored 1.0** and 7 scored 0.0. [Full oracle result](evidence/oracle-harbor-0.27.0.png)
+This adapter converts LoopsBench tasks into Harbor tasks. The upstream manifest for `loopsbench-tasks-c47e13a.tar.zst` lists **112 upstream tasks**. The adapter selects **104 tasks** after eight exclusions. On oahu, the Harbor 0.27.0 oracle ran all 104 final task packages with separate verifiers. **97/104 scored 1.0** and 7 scored 0.0. [Full oracle result](evidence/oracle-harbor-0.27.0.png) · [Per-task rewards, package digests and execution environments at `74e0a92`](evidence/oracle-74e0a92.csv)
 
 The adapter uses the upstream LoopsBench checkout at `f44331c` and task bundle revision `c47e13a`. The upstream repository is MIT-licensed. [Upstream repository](https://github.com/microsoft/Loopsbench)
 
@@ -131,6 +131,8 @@ To compare the exact UTF-8 task argument of both Codex command builders offline,
 env -i PATH=/usr/bin:/bin HOME=/tmp OPENAI_API_KEY=offline-placeholder \
   "$HARBOR_PYTHON" -I src/loopsbench/tests/offline_prompt_check.py "$PLAN" "$UPSTREAM_CHECKOUT"
 ```
+
+The [offline comparison for the ten-task plan](evidence/parity-prompt-check.txt) records each matching command argument’s UTF-8 byte length and SHA-256 digest on Harbor 0.27.0 and upstream f44331c. It covers prompt preparation only.
 
 After obtaining the parity allocation, export `OPENAI_API_KEY` in the launching shell. Run one paired round as follows. Use the executable from the pinned upstream checkout to avoid confusion with the generator CLI.
 
