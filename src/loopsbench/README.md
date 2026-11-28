@@ -87,7 +87,7 @@ test -d "$REVIEWED_TASKS_DIR" &&
     --output-dir ../../datasets/loopsbench-reviewed
 ```
 
-`--tasks-dir` is required. `--task-ids` narrows selection within the reviewed input and accepts upstream or Harbor IDs. `--limit` caps the number of generated tasks, and `--overwrite` replaces existing selected tasks. A directory containing an excluded task is rejected. Use a new output directory when migrating an older dataset. `--bundle` records the source bundle revision. `--cpus`, `--memory-mb`, and `--storage-mb` override the generated resource settings.
+`--tasks-dir` is required. `--task-ids` narrows selection within the reviewed input and accepts upstream or Harbor IDs. `--limit` caps the number of generated tasks, and `--overwrite` replaces complete selected tasks. An interrupted build can be retried with the original command. Incomplete outputs are rebuilt; the previous task stays in place until its replacement passes completeness checks. A directory containing an excluded task is rejected. Use a new output directory when migrating an older dataset. `--bundle` records the source bundle revision. `--cpus`, `--memory-mb`, and `--storage-mb` override the generated resource settings.
 
 ## Comparison with Original Benchmark (Parity)
 
@@ -110,6 +110,36 @@ The sample is fixed for bundle `c47e13a`. We grouped the 104 reviewed tasks by u
 | Medium | 42 | numpy-dl-aics-style, cocos2dx-physics2d-medium, deep-learning-three-assignments, ligra-graph-evolution |
 | Hard, unsegmented | 21 | evosuite-test-generation, boogie-dafny |
 | Hard, segmented | 24 | navidrome-seg02, echarts-seg05 |
+
+### Prepare and run paired Codex jobs
+
+From the adapters repository root, use the ten generated Harbor packages above and the same reviewed source bundle. Set `PARITY_MODEL` to the agreed `openai/MODEL` snapshot, `OPENAI_BASE_URL` to the agreed HTTPS Responses API base URL, `CODEX_VERSION` to the exact npm release, and `CODEX_BIN_HOST` to the matching native Linux executable on the upstream run host. Use Harbor 0.27.0 and upstream f44331c. Preparation only writes files and does not require a key.
+
+```bash
+export PLAN="$PWD/parity-smoke"
+uv run --project src/loopsbench python -m loopsbench.parity \
+  --source "$REVIEWED_TASKS_DIR" --harbor datasets/loopsbench-parity \
+  --split smoke --output "$PLAN" --model "$PARITY_MODEL" \
+  --base-url "$OPENAI_BASE_URL" --version "$CODEX_VERSION" --binary "$CODEX_BIN_HOST"
+```
+
+For the two source tasks that request host networking, staging removes that setting so the native agent can use the same model-endpoint allowlist as Harbor. The Harbor job lists each task path explicitly. Each upstream job stages one matching task with its own verifier network policy and the generated Harbor build context. Both sides use one attempt, the same model endpoint and disabled web search. Upstream uses one outer-loop round. The original task and native grader are retained. Check the actual prompt, CLI version, time limits and model route in both smoke traces before running the full set.
+
+After obtaining the parity allocation, export `OPENAI_API_KEY` in the launching shell. Run one paired round as follows. Use the executable from the pinned upstream checkout to avoid confusion with the generator CLI.
+
+```bash
+(
+  set -eu
+  test "$("$CODEX_BIN_HOST" --version)" = "codex-cli $CODEX_VERSION"
+  export DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1
+  for cfg in "$PLAN"/*/run.yaml; do
+    "$UPSTREAM_CHECKOUT/.venv/bin/loopsbench" run -c "$cfg"
+  done
+  harbor run -c "$PLAN/harbor.yaml"
+)
+```
+
+For each of the three formal rounds, prepare a fresh plan directory with `--split full`. Here `full` means all ten parity tasks. Finish and check both sides of the first round before preparing the next. A fresh plan gives each round separate results directories.
 
 ### Results
 

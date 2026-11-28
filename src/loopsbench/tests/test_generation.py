@@ -7,10 +7,13 @@ import sys
 import tempfile
 from threading import Event
 import unittest
+
+import yaml
 from unittest.mock import patch
 
 from loopsbench.adapter import LoopsBenchAdapter
 from loopsbench.main import PARITY_TASK_IDS
+from loopsbench.parity import prepare, SMOKE_IDS
 
 
 class GenerationTests(unittest.TestCase):
@@ -177,6 +180,37 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(initial.result(timeout=5), [self.output / "distributed-fs-chfs"])
             self.assertEqual(concurrent.result(timeout=5), [])
             second_generate.assert_not_called()
+
+    def test_paired_plans_keep_exact_task_sets_and_endpoint_access(self):
+        for task_id in PARITY_TASK_IDS:
+            src = self.make_task(task_id)
+            if task_id == "numpy-dl-aics-style":
+                (src / "docker-compose.yaml").write_text(yaml.safe_dump({"services": {
+                    "client": {"network_mode": "host"}, "tester": {"image": "task-client"}
+                }}))
+        self.adapter(bundle="c47e13a").run()
+        for split, expected in [("smoke", SMOKE_IDS), ("full", PARITY_TASK_IDS)]:
+            plan = self.root / split
+            prepare(self.source, self.output, plan, split=split, model="openai/test",
+                    base_url="https://model.example/v1", version="1.2.3",
+                    binary=Path("/opt/test/codex"))
+            job = yaml.safe_load((plan / "harbor.yaml").read_text())
+            self.assertEqual([Path(t["path"]).name for t in job["tasks"]], list(expected))
+            self.assertEqual(job["agents"][0]["kwargs"]["version"], "1.2.3")
+            self.assertEqual(job["agents"][0]["extra_allowed_hosts"], ["model.example"])
+            for task_id in expected:
+                native = yaml.safe_load((plan / task_id / "run.yaml").read_text())
+                self.assertEqual(native["agent"], "codex")
+                self.assertEqual(native["model"], job["agents"][0]["model_name"])
+                self.assertEqual(native["n_attempts"], 1)
+                self.assertEqual(native["agent_kwargs"]["outer_loop_count"], 1)
+                self.assertEqual(native["network"]["agent"], {
+                    "network_mode": "allowlist", "allowed_hosts": ["model.example"]
+                })
+                source_id = "task_" + task_id.replace("-", "_")
+                self.assertEqual(native["task_ids"], [source_id])
+                compose = Path(native["dataset_path"]) / source_id / "docker-compose.yaml"
+                self.assertNotIn("network_mode", yaml.safe_load(compose.read_text())["services"]["client"])
 
     def test_parity_cli_checks_all_ten_tasks_including_skips(self):
         for task_id in PARITY_TASK_IDS:

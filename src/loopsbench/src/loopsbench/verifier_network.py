@@ -109,7 +109,8 @@ def bake_verifier_dependencies(upstream_id: str, dockerfile: str) -> str:
     return anchor.sub(lambda _: replacement, dockerfile, count=1)
 
 
-def prepare_upstream(source_task: Path, harbor_task: Path, output_dir: Path) -> Path:
+def prepare_upstream(source_task: Path, harbor_task: Path, output_dir: Path, *,
+                     model_host: str | None = None) -> Path:
     """Stage one original task and its generated Harbor build context for comparison."""
     upstream_id = source_task.name
     policy = _policy(upstream_id)
@@ -175,9 +176,15 @@ def prepare_upstream(source_task: Path, harbor_task: Path, output_dir: Path) -> 
     # Upstream rejects host networking and its sidecar cannot share the
     # NET_ADMIN client's namespace. The oracle comparison isolates these
     # clients statically and retains NET_ADMIN for TCP's loopback aliases.
+    if model_host and client.get("network_mode") == "host":
+        # Harbor omits host networking. Let the native harness attach its
+        # managed model-endpoint network for the paired Codex solve phase.
+        client.pop("network_mode")
     static_client = (
         client.get("network_mode") == "host" or "NET_ADMIN" in client.get("cap_add", [])
     )
+    if static_client and model_host:
+        raise ValueError(f"{upstream_id}: isolated client cannot reach the parity model")
     if static_client:
         client.pop("networks", None)
         client["network_mode"] = "none"
@@ -210,6 +217,9 @@ def prepare_upstream(source_task: Path, harbor_task: Path, output_dir: Path) -> 
         comments.append("# Compose isolates the client with network_mode: none because it cannot use the upstream sidecar.")
     if policy.upstream_static_tester:
         comments.append("# Compose isolates the TCP tester with network_mode: none and retains NET_ADMIN.")
+    if model_host:
+        config["network"]["agent"] = {"network_mode": "allowlist", "allowed_hosts": [model_host]}
+        comments = ["# Staged upstream parity comparison."]
     rendered_config = "\n".join(comments) + "\n" + yaml.safe_dump(config, sort_keys=False)
 
     output_dir.mkdir()
