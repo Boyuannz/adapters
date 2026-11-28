@@ -150,6 +150,12 @@ After obtaining the parity allocation, export `OPENAI_API_KEY` in the launching 
 
 For each of the three formal rounds, prepare a fresh plan directory with `--split full`. Here `full` means all ten parity tasks. Finish and check both sides of the first round before preparing the next. A fresh plan gives each round separate results directories.
 
+### Collect a completed round
+
+Keep the plan and raw outputs together. In each upstream per-task run, read the trial in `results.json` under the configured `output_path`. Record its `task_id`, `failure_mode` and Boolean `is_resolved`. In each Harbor trial's `result.json` under the plan's `harbor-results`, record the task identity, `exception_info` and `verifier_result.rewards.reward`. Also retain the Harbor job summary. Normalize upstream IDs to the corresponding plan task IDs. Review exceptions, missing outcomes and repeat attempts against the trial logs before scoring.
+
+For each formal round, check that each side has exactly one graded binary outcome for each of the same ten tasks. Keep the five-task smoke run separate. Each side's round score is its number of resolved tasks divided by ten. For three rounds, report the three raw scores per side, their arithmetic mean and the sample standard deviation divided by the square root of three. Record whether the two observed score ranges overlap. Keep the same units in the README and the results JSON.
+
 ### Results
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
